@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UAV Route Planner</title>
+    <meta charset="utf-8">
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=cd64120d-b9bd-4e38-902a-7160a9d8d548&lang=ru_RU"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; position: relative; overflow: visible;}
+        #panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 350px;
+            padding: 15px;
+            box-sizing: border-box;
+            background: rgba(245,245,245,0.9);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 12px;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .point-btn { background: #316dff; }
+        .point-btn.active { background: #1e5fd9; box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+        .start-btn { background: #4CAF50; }
+        .start-btn.active { background: #3e8e41; }
+        .end-btn { background: #F44336; }
+        .end-btn.active { background: #d32f2f; }
+        .clear-btn { background: #9E9E9E; }
+        button:hover { opacity: 0.9; }
+        input {
+            padding: 8px;
+            margin: 5px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .point-type { font-weight: bold; }
+        .start-point { color: #4CAF50; }
+        .end-point { color: #F44336; }
+        .middle-point { color: #316dff; }
+
+        /* Стили для кнопок переключения типа карты */
+        .map-type-container {
+            display: flex;
+            margin: 10px 0;
+        }
+
+        .map-type {
+            flex: 1;
+            margin: 0;
+            padding: 8px 12px;
+            background: #f0f0f0;
+            color: #000;
+            border: 1px solid #ccc;
+            border-radius: 0;
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.2s ease;
+            font-weight: normal;
+            text-align: center;
+        }
+
+        .map-type:first-child {
+            border-radius: 4px 0 0 4px;
+            margin-right: -1px;
+        }
+
+        .map-type:last-child {
+            border-radius: 0 4px 4px 0;
+            margin-left: -1px;
+        }
+
+        .map-type.active {
+            background: #e0e0e0;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+            font-weight: bold;
+            border-color: #aaa;
+            z-index: 1;
+        }
+
+        .map-type:hover {
+            background: #e8e8e8;
+        }
+
+        .map-type:active {
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.4);
+        }
+
+        /* Стили для кнопок выбора типа точки */
+        .point-type-buttons {
+            display: flex;
+            margin: 10px 0;
+        }
+
+        .start-btn, .end-btn, .point-btn {
+            flex: 1;
+            margin: 0;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 0;
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.2s ease;
+            font-weight: normal;
+            text-align: center;
+            color: white;
+        }
+
+        .start-btn {
+            border-radius: 4px 0 0 4px;
+            margin-right: -1px;
+        }
+
+        .point-btn {
+            margin-left: -1px;
+            margin-right: -1px;
+        }
+
+        .end-btn {
+            border-radius: 0 4px 4px 0;
+            margin-left: -1px;
+        }
+
+        .start-btn {
+            background: #4CAF50;
+        }
+
+        .end-btn {
+            background: #F44336;
+        }
+
+        .point-btn {
+            background: #316dff;
+        }
+
+        .start-btn.active, .end-btn.active, .point-btn.active {
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.4);
+            font-weight: bold;
+            transform: translateY(1px);
+        }
+
+        .start-btn.active {
+            background: #3e8e41;
+        }
+
+        .end-btn.active {
+            background: #d32f2f;
+        }
+
+        .point-btn.active {
+            background: #1e5fd9;
+        }
+
+        .start-btn:hover {
+            background: #43A047;
+        }
+
+        .end-btn:hover {
+            background: #E53935;
+        }
+
+        .point-btn:hover {
+            background: #2a65e6;
+        }
+
+        .start-btn:active, .end-btn:active, .point-btn:active {
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            transform: translateY(2px);
+        }
+
+        /* Стили для балуна */
+        .ymaps-2-1-79-balloon__content {
+            padding: 15px !important;
+            margin-right: 0 !important;
+        }
+
+        .balloon-content {
+            min-width: 200px;
+        }
+
+        .balloon-footer {
+            margin-top: 10px;
+            text-align: right;
+        }
+
+        .delete-btn {
+            background: #F44336;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .delete-btn:hover {
+            background: #d32f2f;
+        }
+
+        /* Добавляем новые стили для группы радиокнопок */
+        .radio-group {
+            margin: 15px 0;
+        }
+
+        .radio-label {
+            display: block;
+            position: relative;
+            padding-left: 30px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .radio-label input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .radio-custom {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 20px;
+            width: 20px;
+            background-color: #eee;
+            border-radius: 50%;
+            border: 2px solid #ddd;
+        }
+
+        .radio-label:hover input ~ .radio-custom {
+            background-color: #ccc;
+        }
+
+        .radio-label input:checked ~ .radio-custom {
+            background-color: #316dff;
+            border-color: #316dff;
+        }
+
+        .radio-custom:after {
+            content: "";
+            position: absolute;
+            display: none;
+        }
+
+        .radio-label input:checked ~ .radio-custom:after {
+            display: block;
+        }
+
+        .radio-label .radio-custom:after {
+            content: "";
+            position: absolute;
+            display: none;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: white;
+        }
+
+        /* Добавляем стили для кнопки анимации */
+        #animation-control {
+            background: #ff9800;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        #animation-control.playing {
+            background: #f44336;
+        }
+
+        #uav-icon {
+            width: 400px;         /* Ширина иконки */
+            height: 400px;        /* Высота иконки */
+            object-fit: contain; /* Сохраняет пропорции */
+            transform-origin: center; /* Точка вращения по центру */
+            transition: transform 0.5s ease; /* Плавное вращение */
+            position: absolute;
+            pointer-events: none;
+            z-index: 999;
+            display: none;
+        }
+
+        .uav-placemark {
+            background-image: url('drone_red.png');
+            background-size: contain;
+            width: 40px;
+            height: 40px;
+            transform-origin: center;
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h2>Планирование маршрута</h2>
+        <div>
+            <h3>Тип точки:</h3>
+            <div class="point-type-buttons">
+                <button id="start-btn" class="start-btn">Начальная</button>
+                <button id="point-btn" class="point-btn active">Промежуточная</button>
+                <button id="end-btn" class="end-btn">Конечная</button>
+            </div>
+        </div>
+        <button id="calculate" class="point-btn" style="width: 100%; margin: 10px 0;">Рассчитать маршрут</button>
+        <div class="radio-group">
+            <h3>Тип маршрута:</h3>
+            <label class="radio-label">
+                <input type="radio" name="routeType" value="smooth" checked>
+                <span class="radio-custom"></span>
+                Сгладить
+            </label>
+            <label class="radio-label">
+                <input type="radio" name="routeType" value="sharp">
+                <span class="radio-custom"></span>
+                Резко
+            </label>
+        </div>
+        <button id="export" class="point-btn" style="width: 100%; margin: 10px 0;">Экспорт в GPX</button>
+        <button id="clear" class="clear-btn" style="width: 100%; margin: 10px 0;">Очистить все</button>
+        <div>
+            <h3>Тип карты:</h3>
+            <div class="map-type-container">
+                <button class="map-type active" data-type="yandex#map">Схема</button>
+                <button class="map-type" data-type="yandex#satellite">Спутник</button>
+                <button class="map-type" data-type="yandex#hybrid">Гибрид</button>
+            </div>
+        </div>
+
+        <div class="radio-group">
+            <h3>Режим траектории:</h3>
+            <label class="radio-label">
+                <input type="radio" name="trajectoryMode" value="manual" checked>
+                <span class="radio-custom"></span>
+                Ручная траектория
+            </label>
+            <label class="radio-label">
+                <input type="radio" name="trajectoryMode" value="file">
+                <span class="radio-custom"></span>
+                Загрузить из файла
+            </label>
+        </div>
+
+        <div id="camera-info" style="margin-top: 10px; display: none;">
+            <h3>Параметры съемки:</h3>
+            <div id="camera-params"></div>
+        </div>
+
+        <div id="file-upload-container" style="display: none; margin: 10px 0;">
+            <input type="file" id="trajectory-file" accept=".srt,.gpx" style="display: none;">
+            <button id="select-trajectory-file" class="point-btn" style="width: 100%;">Выбрать файл траектории</button>
+            <div id="file-info" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
+            <button id="animation-control" class="point-btn">Старт анимации</button>
+        </div>
+    </div>
+
+    <script>
+        ymaps.ready(init);
+        let map, route, smoothRoute;
+        let placemarks = [];
+        let startPoint = null, endPoint = null, currentMode = 'point';
+        const placemarkIds = new Map(); // Хранилище ID меток
+        let trajectoryMode = 'manual';
+        let uploadedRoute = null;
+
+        let animationInterval;
+        let currentAnimationIndex = 0;
+        let isPlaying = false;
+        let uavIcon;
+        let routePoints = [];
+
+        let uavPlacemark;
+
+        // Настройки иконок для точек маршрута
+        const pointIcons = {
+            start: {
+                preset: 'islands#greenDotIcon',
+                iconColor: '#4CAF50'
+            },
+            end: {
+                preset: 'islands#redDotIcon',
+                iconColor: '#F44336'
+            },
+            point: {
+                preset: 'islands#blueDotIcon',
+                iconColor: '#316dff'
+            }
+        };
+
+        window.removePlacemark = function(id) {
+            const placemark = placemarkIds.get(id);
+            if (!placemark) return;
+
+            // Удаляем из специальных точек
+            if (placemark === startPoint) startPoint = null;
+            if (placemark === endPoint) endPoint = null;
+
+            // Удаляем с карты и из хранилищ
+            map.geoObjects.remove(placemark);
+            placemarkIds.delete(id);
+            placemarks = placemarks.filter(p => p !== placemark);
+
+            updateRoute();
+
+            // Удаляем сглаженный маршрут
+            if (smoothRoute) {
+                map.geoObjects.remove(smoothRoute);
+                smoothRoute = null;
+            }
+        };
+
+        function init() {
+            try {
+                // 1. Инициализация карты
+                initMap();
+
+                // 2. Инициализация UI элементов
+                initUIElements();
+
+                // 3. Инициализация обработчиков событий
+                initEventHandlers();
+
+                console.log('Приложение успешно инициализировано');
+            } catch (error) {
+                console.error('Ошибка инициализации:', error);
+                alert('Произошла ошибка при загрузке приложения. Пожалуйста, обновите страницу.');
+            }
+
+            // Обработчик кнопки анимации
+            document.getElementById('animation-control').addEventListener('click', toggleAnimation);
+        }
+
+        function initMap() {
+            // Создаем карту
+            map = new ymaps.Map('map', {
+                center: [54.6294, 39.7417],
+                zoom: 11,
+                controls: ['zoomControl']
+            });
+
+            uavIcon = document.getElementById('uav-icon');
+            if (!uavIcon) {
+                uavIcon = document.createElement('img');
+                uavIcon.id = 'uav-icon';
+                uavIcon.src = 'drone_red.png';
+                document.getElementById('map').appendChild(uavIcon);
+            }
+
+            // Проверка загрузки изображения
+            uavIcon.onload = () => console.log('Иконка БПЛА загружена');
+            uavIcon.onerror = () => {
+                console.error('Ошибка загрузки иконки БПЛА');
+                uavIcon.style.backgroundColor = 'red';
+                uavIcon.style.borderRadius = '50%';
+                uavIcon.style.border = '2px solid white';
+            };
+            const style = document.createElement('style');
+            style.textContent = `
+                .ymaps-2-1-79-searchbox,
+                .ymaps-2-1-79-traffic-control,
+                .ymaps-2-1-79-controls__toolbar_right {
+                    display: none !important;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // Создаем основную линию маршрута
+            route = new ymaps.Polyline([], {}, {
+                strokeColor: "#0000FF",
+                strokeWidth: 4,
+                strokeOpacity: 0.7
+            });
+            map.geoObjects.add(route);
+
+            // Создаем метку для БПЛА
+            uavPlacemark = new ymaps.Placemark([0, 0], {}, {
+                iconLayout: 'default#image',
+                iconImageHref: 'drone_red.png',
+                iconImageSize: [40, 40],
+                iconImageOffset: [-20, -20],
+                // Fallback если изображение не загрузится
+                iconImageShape: {
+                    type: 'Circle',
+                    coordinates: [20, 20],
+                    radius: 20
+                },
+                iconColor: '#ff0000', // Красный цвет если нет изображения
+                zIndex: 999
+            });
+
+            // Добавляем метку на карту (но пока скрытую)
+            map.geoObjects.add(uavPlacemark);
+            uavPlacemark.options.set('visible', false);
+        }
+
+        function initUIElements() {
+            // Проверяем существование всех необходимых элементов
+            const requiredElements = [
+                'start-btn', 'end-btn', 'point-btn',
+                'calculate', 'export', 'clear',
+                'file-upload-container', 'file-info',
+                'trajectory-file', 'select-trajectory-file',
+                'camera-info', 'camera-params'  // Добавляем новые элементы
+            ];
+
+            requiredElements.forEach(id => {
+                if (!document.getElementById(id)) {
+                    console.error(`Элемент с ID "${id}" не найден`);
+                }
+            });
+        }
+
+        function initEventHandlers() {
+            // Обработчик клика по карте
+            map.events.add('click', function(e) {
+                if (trajectoryMode === 'manual') {
+                    addWaypoint(e.get('coords'));
+                }
+            });
+
+            // Инициализация кнопок управления
+            initButton('#start-btn', () => setMode('start'));
+            initButton('#end-btn', () => setMode('end'));
+            initButton('#point-btn', () => setMode('point'));
+            initButton('#calculate', calculateRoute);
+            initButton('#export', exportToGPX);
+            initButton('#clear', clearAll);
+
+            // Инициализация кнопок переключения карты
+            document.querySelectorAll('.map-type').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const type = this.dataset.type;
+                    document.querySelectorAll('.map-type').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    map.setType(type);
+                });
+            });
+
+            // Инициализация переключателей режима траектории
+            document.querySelectorAll('input[name="trajectoryMode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    trajectoryMode = this.value;
+                    updateUIForTrajectoryMode();
+                });
+            });
+
+            // Инициализация загрузки файлов
+            const fileInput = document.getElementById('trajectory-file');
+            const selectFileBtn = document.getElementById('select-trajectory-file');
+            const fileInfo = document.getElementById('file-info');
+
+            if (selectFileBtn && fileInput) {
+                selectFileBtn.addEventListener('click', () => fileInput.click());
+
+                fileInput.addEventListener('change', function(e) {
+                    if (e.target.files.length > 0) {
+                        const file = e.target.files[0];
+                        if (fileInfo) fileInfo.textContent = `Выбран файл: ${file.name}`;
+
+                        if (file.name.endsWith('.srt')) {
+                            parseSRTFile(file);
+                        } else if (file.name.endsWith('.SRT')) {
+                            parseSRTFile(file);
+                        } else {
+                            alert('Поддерживаются только файлы .srt');
+                        }
+                    }
+                });
+            }
+        }
+
+        // Вспомогательная функция для инициализации кнопок
+        function initButton(selector, handler) {
+            const button = document.querySelector(selector);
+            if (button) {
+                button.addEventListener('click', handler);
+            } else {
+                console.error(`Кнопка не найдена: ${selector}`);
+            }
+        }
+
+        // Функция для обновления интерфейса в зависимости от режима
+        function updateUIForTrajectoryMode() {
+            const fileUploadContainer = document.getElementById('file-upload-container');
+            const pointTypeButtons = document.querySelector('.point-type-buttons');
+            const calculateBtn = document.getElementById('calculate');
+
+            if (!fileUploadContainer || !pointTypeButtons || !calculateBtn) {
+                console.error('Не найдены элементы интерфейса для обновления');
+                return;
+            }
+
+            if (trajectoryMode === 'file') {
+                fileUploadContainer.style.display = 'block';
+                pointTypeButtons.style.opacity = '0.5';
+                pointTypeButtons.style.pointerEvents = 'none';
+                calculateBtn.style.opacity = '0.5';
+                calculateBtn.style.pointerEvents = 'none';
+                clearAll(); // Очищаем все точки при переключении в режим файла
+            } else {
+                fileUploadContainer.style.display = 'none';
+                pointTypeButtons.style.opacity = '1';
+                pointTypeButtons.style.pointerEvents = 'auto';
+                calculateBtn.style.opacity = '1';
+                calculateBtn.style.pointerEvents = 'auto';
+                if (uploadedRoute) {
+                    map.geoObjects.remove(uploadedRoute);
+                    uploadedRoute = null;
+                }
+                // Останавливаем анимацию при переключении режима
+                if (isPlaying) {
+                    toggleAnimation();
+                }
+            }
+        }
+
+        async function parseSRTFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('http://localhost:8000/api/import-srt', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.status !== 'success') {
+                    throw new Error('Ошибка сервера');
+                }
+
+                // Сохраняем точки для анимации
+                routePoints = data.points;
+
+                // Отображаем маршрут
+                displayRoute(routePoints);
+
+                // Показываем параметры первой точки
+                if (routePoints.length > 0) {
+                    showCameraParams(routePoints[0]);
+                }
+
+                if (uploadedRoute) {
+                    map.geoObjects.remove(uploadedRoute);
+                }
+
+                // Проверяем наличие точек в ответе
+                if (!data.points || !Array.isArray(data.points)) {
+                    throw new Error('Некорректный формат данных');
+                }
+
+                const coords = data.points.map(p => [p.lat, p.lng]);
+                uploadedRoute = new ymaps.Polyline(coords, {}, {
+                    strokeColor: "#00aa00",
+                    strokeWidth: 4,
+                    strokeOpacity: 0.9
+                });
+
+                map.geoObjects.add(uploadedRoute);
+                map.setBounds(uploadedRoute.geometry.getBounds());
+
+                // Безопасный вызов showCameraParams
+                if (data.points.length > 0 && data.points[0]) {
+                    showCameraParams(data.points[0]);
+                }
+
+            } catch (err) {
+                console.error('Ошибка загрузки SRT:', err);
+                alert('Ошибка при загрузке файла: ' + err.message);
+            }
+        }
+
+        // Функция отображения маршрута
+        function displayRoute(points) {
+            if (uploadedRoute) {
+                map.geoObjects.remove(uploadedRoute);
+            }
+
+            const coords = points.map(p => [p.lat, p.lng]);
+            uploadedRoute = new ymaps.Polyline(coords, {}, {
+                strokeColor: "#00aa00",
+                strokeWidth: 4,
+                strokeOpacity: 0.9
+            });
+
+            map.geoObjects.add(uploadedRoute);
+            map.setBounds(uploadedRoute.geometry.getBounds());
+        }
+
+        function toggleAnimation() {
+            const animBtn = document.getElementById('animation-control');
+
+            if (isPlaying) {
+                // Останавливаем анимацию
+                clearInterval(animationInterval);
+                animBtn.textContent = 'Старт анимации';
+                animBtn.classList.remove('playing');
+                uavPlacemark.options.set('visible', false);
+            } else {
+                // Запускаем анимацию
+                if (routePoints.length === 0) {
+                    alert('Сначала загрузите файл траектории');
+                    return;
+                }
+
+                animBtn.textContent = 'Стоп анимации';
+                animBtn.classList.add('playing');
+                currentAnimationIndex = 0;
+                startAnimation();
+            }
+
+            isPlaying = !isPlaying;
+        }
+
+        // Запуск анимации
+        function startAnimation() {
+            uavIcon.style.display = 'block';
+
+            if (!uavIcon) {
+                console.error('Иконка БПЛА не инициализирована');
+                return;
+            }
+
+            uavIcon.style.display = 'block';
+            console.log('Анимация запущена, иконка должна быть видна');
+
+            animationInterval = setInterval(() => {
+                if (currentAnimationIndex >= routePoints.length) {
+                    // Анимация завершена
+                    toggleAnimation();
+                    return;
+                }
+
+                const point = routePoints[currentAnimationIndex];
+
+                // Обновляем позицию иконки
+                updateUavPosition(point);
+
+                // Обновляем параметры камеры
+                showCameraParams(point);
+
+                currentAnimationIndex++;
+            }, 100); // Интервал в мс (можно регулировать скорость)
+        }
+
+        // Обновление позиции БПЛА
+        function updateUavPosition(point) {
+            if (!point || !point.lat || !point.lng) {
+                console.error('Некорректные координаты точки:', point);
+                return;
+            }
+
+            try {
+                // Обновляем позицию метки
+                uavPlacemark.geometry.setCoordinates([point.lat, point.lng]);
+                uavPlacemark.options.set('visible', true);
+
+                // Поворот иконки
+                if (currentAnimationIndex > 0) {
+                    const prevPoint = routePoints[currentAnimationIndex - 1];
+                    const angle = calculateBearing(prevPoint, point);
+                    uavPlacemark.options.set('iconImageOffset', [-20, -20]);
+                    uavPlacemark.options.set('iconImageShape', {
+                        type: 'Rectangle',
+                        coordinates: [[0, 0], [40, 40]]
+                    });
+                    uavPlacemark.options.set('rotation', angle);
+                }
+
+                console.log('Позиция БПЛА обновлена:', point.lat, point.lng);
+            } catch (error) {
+                console.error('Ошибка при обновлении позиции БПЛА:', error);
+            }
+        }
+
+        // Расчет направления движения
+        function calculateBearing(pointA, pointB) {
+            const lat1 = pointA.lat * Math.PI / 180;
+            const lon1 = pointA.lng * Math.PI / 180;
+            const lat2 = pointB.lat * Math.PI / 180;
+            const lon2 = pointB.lng * Math.PI / 180;
+
+            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) -
+                      Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+
+            return (Math.atan2(y, x) * 180 / Math.PI + 90) % 360;
+        }
+
+        // Функция для отображения параметров съемки
+        function showCameraParams(params) {
+            const container = document.getElementById('camera-params');
+            const cameraInfo = document.getElementById('camera-info');
+
+            // Проверяем существование элементов
+            if (!container || !cameraInfo) {
+                console.error('Не найдены элементы для отображения параметров камеры');
+                return;
+            }
+
+            // Проверяем наличие параметров
+            if (!params) {
+                console.error('Не переданы параметры камеры');
+                return;
+            }
+
+            try {
+                container.innerHTML = `
+                    <div><strong>Координаты:</strong> ${params.lat?.toFixed(6) || 'N/A'}, ${params.lng?.toFixed(6) || 'N/A'}</div>
+                    <div><strong>Высота:</strong> ${params.alt?.toFixed(2) || 'N/A'} м</div>
+                `;
+                cameraInfo.style.display = 'block';
+            } catch (error) {
+                console.error('Ошибка при отображении параметров камеры:', error);
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            const startBtn = document.getElementById('start-btn');
+            const endBtn = document.getElementById('end-btn');
+            const pointBtn = document.getElementById('point-btn');
+
+            if (startBtn && endBtn && pointBtn) {
+                startBtn.classList.remove('active');
+                endBtn.classList.remove('active');
+                pointBtn.classList.remove('active');
+                document.getElementById(mode + '-btn').classList.add('active');
+            }
+        }
+
+        function addWaypoint(coords) {
+            if (trajectoryMode === 'file') return;
+
+            // Удаляем предыдущую точку, если это начальная или конечная
+            if (currentMode === 'start' && startPoint) {
+                removePlacemark(startPoint.properties.get('id'));
+            } else if (currentMode === 'end' && endPoint) {
+                removePlacemark(endPoint.properties.get('id'));
+            }
+
+            // Создаем уникальный ID для метки
+            const placemarkId = 'pm_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+
+            // Создаем метку
+            const placemark = new ymaps.Placemark(coords, {
+                balloonContentHeader: `${getTypeName(currentMode)}<br>точка`,
+                balloonContentBody: `
+                    <div>Широта: ${coords[0].toFixed(6)}</div>
+                    <div>Долгота: ${coords[1].toFixed(6)}</div>
+                    <div class="balloon-footer">
+                        <button class="delete-btn" id="delete-${placemarkId}">Удалить</button>
+                    </div>
+                `
+            }, {
+                preset: pointIcons[currentMode].preset,
+                iconColor: pointIcons[currentMode].iconColor,
+                draggable: true,
+                balloonCloseButton: true, // Добавляем эту строку для включения стандартного крестика
+                balloonPanelMaxMapArea: 0, // Отключаем автоматический расчет размера
+                balloonMaxWidth: 200,      // Максимальная ширина балуна в пикселях
+                balloonMinWidth: 150       // Минимальная ширина балуна
+            });
+
+            // Сохраняем ID и тип точки
+            placemark.properties.set('id', placemarkId);
+            placemark.properties.set('type', currentMode);
+            placemarkIds.set(placemarkId, placemark);
+
+            // Добавляем метку на карту
+            map.geoObjects.add(placemark);
+
+            // Обработчик открытия балуна
+            placemark.events.add('balloonopen', function() {
+                // Ждем пока балун полностью отрендерится
+                setTimeout(() => {
+                    // Находим кнопку удаления по ID
+                    const deleteBtn = document.getElementById(`delete-${placemarkId}`);
+                    if (deleteBtn) {
+                        deleteBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            removePlacemark(placemarkId);
+                        };
+                    }
+                }, 50);
+            });
+
+            // Обработчик перемещения точки
+            placemark.events.add('dragend', function() {
+                updateRoute();
+                if (smoothRoute) {
+                    map.geoObjects.remove(smoothRoute);
+                    smoothRoute = null;
+                }
+            });
+
+            // Сохраняем точку
+            if (currentMode === 'start') startPoint = placemark;
+            if (currentMode === 'end') endPoint = placemark;
+            placemarks.push(placemark);
+
+            updateRoute();
+        }
+
+        function getTypeName(type) {
+            const names = {
+                'start': 'Начальная',
+                'end': 'Конечная',
+                'point': 'Промежуточная'
+            };
+            return names[type];
+        }
+
+        function updateRoute() {
+            // Сортируем точки: начальная -> промежуточные -> конечная
+            const coordinates = [];
+            if (startPoint) coordinates.push(startPoint.geometry.getCoordinates());
+            coordinates.push(...placemarks
+                .filter(p => p !== startPoint && p !== endPoint)
+                .map(p => p.geometry.getCoordinates()));
+            if (endPoint) coordinates.push(endPoint.geometry.getCoordinates());
+
+            route.geometry.setCoordinates(coordinates);
+        }
+
+        function clearAll() {
+            placemarks.forEach(pm => map.geoObjects.remove(pm));
+            placemarks = [];
+            startPoint = null;
+            endPoint = null;
+            if (smoothRoute) {
+                map.geoObjects.remove(smoothRoute);
+                smoothRoute = null;
+            }
+            updateRoute();
+        }
+
+        async function calculateRoute() {
+            if (placemarks.length < 2) {
+                alert('Добавьте минимум 2 точки');
+                return;
+            }
+
+            if (!startPoint) {
+                alert('Не указана начальная точка');
+                return;
+            }
+
+            if (!endPoint) {
+                alert('Не указана конечная точка');
+                return;
+            }
+
+            try {
+                // Получаем выбранный тип маршрута
+                const routeType = document.querySelector('input[name="routeType"]:checked').value;
+                const smooth = routeType === 'smooth';
+
+                // Подготавливаем данные для отправки
+                const points = [];
+                if (startPoint) points.push(getPointData(startPoint));
+                points.push(...placemarks
+                    .filter(p => p !== startPoint && p !== endPoint)
+                    .map(p => getPointData(p)));
+                if (endPoint) points.push(getPointData(endPoint));
+
+                // Отправляем на бэкенд
+                const response = await fetch('http://localhost:8000/api/calculate-route', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        points: points,
+                        smooth: smooth
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.status !== 'success') {
+                    throw new Error('Ошибка сервера');
+                }
+
+                // Удаляем предыдущий сглаженный маршрут, если есть
+                if (smoothRoute) {
+                    map.geoObjects.remove(smoothRoute);
+                }
+
+                // Преобразуем полученные точки в формат для карты
+                const smoothCoords = data.points.map(p => [p.lat, p.lng]);
+
+                // Создаем маршрут
+                smoothRoute = new ymaps.Polyline(smoothCoords, {}, {
+                    strokeColor: "#c800ff",
+                    strokeWidth: 4,
+                    strokeOpacity: 0.9
+                });
+
+                map.geoObjects.add(smoothRoute);
+
+            } catch (err) {
+                console.error('Ошибка расчета маршрута:', err);
+                alert('Ошибка расчета маршрута: ' + err.message);
+            }
+        }
+
+        function getPointData(placemark) {
+            const coords = placemark.geometry.getCoordinates();
+            return {
+                lat: coords[0],
+                lng: coords[1],
+                type: placemark.properties.get('type') || 'point'
+            };
+        }
+
+        async function exportToGPX() {
+            if (placemarks.length < 2) {
+                alert('Добавьте минимум 2 точки');
+                return;
+            }
+
+            try {
+                const points = [];
+                if (startPoint) points.push(getPointData(startPoint));
+                points.push(...placemarks
+                    .filter(p => p !== startPoint && p !== endPoint)
+                    .map(p => getPointData(p)));
+                if (endPoint) points.push(getPointData(endPoint));
+
+                const response = await fetch('http://localhost:8000/api/export-gpx', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        points: points,
+                        smooth: false
+                    })
+                });
+
+                const data = await response.json();
+
+                const blob = new Blob([data.gpx], {type: 'application/xml'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'маршрут_' + new Date().toISOString().slice(0, 10) + '.gpx';
+                a.click();
+            } catch (err) {
+                alert('Ошибка экспорта: ' + err.message);
+            }
+        }
+
+        window.removePlacemark = removePlacemark;
+
+    </script>
+</body>
+</html>
