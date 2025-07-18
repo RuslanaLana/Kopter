@@ -1,48 +1,69 @@
-ymaps.ready(init);
-let map, route, smoothRoute;
+// Основные переменные для работы с картой и маршрутами
+let map,          // Основной объект Яндекс.Карты
+    route,        // Основной маршрут (линия между точками)
+    smoothRoute;  // Сглаженная версия маршрута (для визуализации)
+
+// Массив всех меток на карте
 let placemarks = [];
-let startPoint = null, endPoint = null, currentMode = 'point';
-const placemarkIds = new Map(); // Хранилище ID меток
+
+// Специальные точки маршрута
+let startPoint = null,   // Начальная точка маршрута
+    endPoint = null,     // Конечная точка маршрута
+    currentMode = 'start'; // Текущий режим добавления точек ('start', 'end', 'point')
+
+// Хранилище для связи ID меток с их объектами (используется для быстрого доступа)
+const placemarkIds = new Map();
+
+// Режим построения траектории: 'manual' - ручной, 'file' - из файла
 let trajectoryMode = 'manual';
+
+// Загруженный маршрут из файла (если используется режим 'file')
 let uploadedRoute = null;
 
-let isPlaying = false;
-let uavIcon;
-let routePoints = [];
+// Переменные для управления анимацией полета
+let isPlaying = false;    // Флаг, идет ли воспроизведение анимации
+let routePoints = [];     // Массив точек маршрута для анимации
 
+// Метка для отображения текущего положения БПЛА на карте
 let uavPlacemark;
 
-let altitudeChart;
-let chartData = {
-    distances: [], // Пройденное расстояние (км) по X
-    altitudes: []  // Высота (м) по Y
+// Переменные для графика высот
+let altitudeChart;       // Объект графика (используется библиотека Chart.js)
+let chartData = {        // Данные для построения графика
+    distances: [],       // Массив пройденных расстояний (в км, ось X)
+    altitudes: []        // Массив высот (в метрах, ось Y)
 };
 
-let animationSpeed = 0.01; // Коэффициент скорости (можно регулировать)
-let animationFrameId = null;
-let animationStartTime = null;
-let animationProgress = 0;
+// Настройки анимации
+let animationSpeed = 0.01;  // Скорость проигрывания анимации (0-1)
+let animationFrameId = null; // ID для управления анимационным кадром
+let animationStartTime = null; // Время начала анимации
+let animationProgress = 0;    // Текущий прогресс анимации (0-1)
 
-let hoveredPoint = null;
-let hoverMarker = null;
+// Переменные для взаимодействия с картой
+let hoveredPoint = null; // Точка маршрута, над которой находится курсор
+let hoverMarker = null;  // Маркер для подсветки точки под курсором
 
+// Флаг, указывающий, что маршрут был успешно построен
 let isRouteCalculated = false;
 
-// Настройки иконок для точек маршрута
+// Настройки внешнего вида меток для разных типов точек
 const pointIcons = {
-    start: {
-        preset: 'islands#greenDotIcon',
-        iconColor: '#4CAF50'
+    start: {  // Начальная точка (зеленая)
+        preset: 'islands#greenDotIcon', // Стандартный пресет Яндекса
+        iconColor: '#4CAF50'            // Дополнительный цвет
     },
-    end: {
+    end: {    // Конечная точка (красная)
         preset: 'islands#redDotIcon',
         iconColor: '#F44336'
     },
-    point: {
+    point: {  // Промежуточные точки (синие)
         preset: 'islands#blueDotIcon',
         iconColor: '#316dff'
     }
 };
+
+ymaps.ready(init);
 
 window.removePlacemark = function(id) {
     const placemark = placemarkIds.get(id);
@@ -120,22 +141,6 @@ function initMap() {
     setTimeout(removeYandexButtons, 1000);
     setTimeout(removeYandexButtons, 3000);
 
-    uavIcon = document.getElementById('uav-icon');
-    if (!uavIcon) {
-        uavIcon = document.createElement('img');
-        uavIcon.id = 'uav-icon';
-        uavIcon.src = 'drone_red.png';
-        document.getElementById('map').appendChild(uavIcon);
-    }
-
-    // Проверка загрузки изображения
-    uavIcon.onload = () => console.log('Иконка БПЛА загружена');
-    uavIcon.onerror = () => {
-        console.error('Ошибка загрузки иконки БПЛА');
-        uavIcon.style.backgroundColor = 'red';
-        uavIcon.style.borderRadius = '50%';
-        uavIcon.style.border = '2px solid white';
-    };
     const style = document.createElement('style');
     style.textContent = `
         .ymaps-2-1-79-searchbox,
@@ -362,10 +367,14 @@ function initAltitudeChart() {
 function toggleChartVisibility() {
     const chartContainer = document.getElementById('chart-container');
     const toggleBtn = document.getElementById('chart-toggle');
+    const panel = document.getElementById('panel');
 
     if (chartContainer.style.display === 'none' || !chartContainer.style.display) {
         chartContainer.style.display = 'block';
         toggleBtn.textContent = '📉';
+        // Обновляем высоту панели при отображении графика
+        panel.style.height = 'calc(100% - 20px - 300px)';
+
         // Инициализируем график если он еще не создан
         if (!altitudeChart && chartData.distances.length > 0) {
             initAltitudeChart();
@@ -373,6 +382,8 @@ function toggleChartVisibility() {
     } else {
         chartContainer.style.display = 'none';
         toggleBtn.textContent = '📈';
+        // Восстанавливаем высоту панели при скрытии графика
+        panel.style.height = 'calc(100% - 20px)';
     }
 
     // Обновляем высоту карты
@@ -784,9 +795,8 @@ function updateUIForTrajectoryMode() {
 }
 
 async function parseSRTFile(file) {
-    if (isPlaying) {
-        toggleAnimation();
-    }
+    if (isPlaying) toggleAnimation();
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -796,44 +806,16 @@ async function parseSRTFile(file) {
             body: formData
         });
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
         const data = await response.json();
 
-        if (data.status !== 'success') {
-            throw new Error('Ошибка сервера');
+        if (data.status === 'success') {
+            routePoints = data.points;
+            displayRoute(routePoints);
+            updateChart(routePoints);
+            if (routePoints.length > 0) showCameraParams(routePoints[0]);
+        } else {
+            throw new Error(data.message || 'Ошибка сервера');
         }
-
-        // Сохраняем точки для анимации
-        routePoints = data.points;
-
-        // Отображаем маршрут
-        displayRoute(routePoints);
-
-        // Обновляем график
-        updateChart(routePoints);
-
-        // Показываем параметры первой точки
-        if (routePoints.length > 0) {
-            showCameraParams(routePoints[0]);
-        }
-
-        if (uploadedRoute) {
-            map.geoObjects.remove(uploadedRoute);
-        }
-
-        const coords = data.points.map(p => [p.lat, p.lng]);
-        uploadedRoute = new ymaps.Polyline(coords, {}, {
-            strokeColor: "#0000FF",
-            strokeWidth: 4,
-            strokeOpacity: 0.9
-        });
-
-        map.geoObjects.add(uploadedRoute);
-        map.setBounds(uploadedRoute.geometry.getBounds());
-
     } catch (err) {
         console.error('Ошибка загрузки SRT:', err);
         alert('Ошибка при загрузке файла: ' + err.message);
@@ -842,19 +824,44 @@ async function parseSRTFile(file) {
 
 // Функция отображения маршрута
 function displayRoute(points) {
+    if (!points || points.length === 0) {
+        console.error('No points to display');
+        return;
+    }
+
+    // Удаляем предыдущий маршрут
     if (uploadedRoute) {
         map.geoObjects.remove(uploadedRoute);
     }
 
+    // Преобразуем точки в формат координат для карты
     const coords = points.map(p => [p.lat, p.lng]);
+
+    // Проверяем, что координаты валидны
+    if (coords.some(coord => !coord[0] || !coord[1])) {
+        console.error('Invalid coordinates in route points');
+        return;
+    }
+
+    // Создаем новую линию маршрута
     uploadedRoute = new ymaps.Polyline(coords, {}, {
         strokeColor: "#0000FF",
         strokeWidth: 4,
         strokeOpacity: 0.9
     });
 
+    // Добавляем маршрут на карту
     map.geoObjects.add(uploadedRoute);
-    map.setBounds(uploadedRoute.geometry.getBounds());
+
+    try {
+        // Получаем границы маршрута и центрируем карту
+        const bounds = uploadedRoute.geometry.getBounds();
+        if (bounds) {
+            map.setBounds(bounds, { checkZoomRange: true });
+        }
+    } catch (e) {
+        console.error('Error setting map bounds:', e);
+    }
 }
 
 function toggleAnimation() {
@@ -886,7 +893,6 @@ function toggleAnimation() {
 
 // Запуск анимации
 function startAnimation() {
-    if (!uavIcon) return;
     animationFrameId = requestAnimationFrame(animateUAV);
 }
 

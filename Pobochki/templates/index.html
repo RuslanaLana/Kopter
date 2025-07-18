@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hikrobot Camera Stream</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            margin: 20px 0;
+            background-color: #000;
+        }
+        #videoStream {
+            width: 100%;
+            display: block;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        .status {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .status.on {
+            color: green;
+        }
+        .status.off {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hikrobot Camera Stream</h1>
+
+        <div class="controls">
+            <label class="switch">
+                <input type="checkbox" id="streamToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="status off" id="statusIndicator">OFF</div>
+
+        <div class="video-container">
+            <img id="videoStream" src="">
+        </div>
+    </div>
+
+    <script>
+        const streamToggle = document.getElementById('streamToggle');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const videoStream = document.getElementById('videoStream');
+        let streamInterval;
+
+        // Проверка статуса стрима при загрузке страницы
+        async function checkStreamStatus() {
+            try {
+                const response = await fetch('/stream_status');
+                const data = await response.json();
+
+                if (data.streaming) {
+                    streamToggle.checked = true;
+                    statusIndicator.textContent = 'ON';
+                    statusIndicator.className = 'status on';
+                    startVideoStream();
+                } else {
+                    streamToggle.checked = false;
+                    statusIndicator.textContent = 'OFF';
+                    statusIndicator.className = 'status off';
+                    stopVideoStream();
+                }
+            } catch (error) {
+                console.error('Error checking stream status:', error);
+            }
+        }
+
+        // Запуск видеострима
+        function startVideoStream() {
+            videoStream.src = '/video_feed';
+            // Обновляем статус каждые 5 секунд
+            streamInterval = setInterval(checkStreamStatus, 5000);
+        }
+
+        // Остановка видеострима
+        function stopVideoStream() {
+            videoStream.src = '';
+            clearInterval(streamInterval);
+        }
+
+        // Обработчик переключателя
+        streamToggle.addEventListener('change', async function() {
+            if (this.checked) {
+                try {
+                    const response = await fetch('/start_stream');
+                    const data = await response.json();
+
+                    if (data.status === 'started' || data.status === 'already running') {
+                        statusIndicator.textContent = 'ON';
+                        statusIndicator.className = 'status on';
+                        startVideoStream();
+                    }
+                } catch (error) {
+                    console.error('Error starting stream:', error);
+                    this.checked = false;
+                }
+            } else {
+                try {
+                    const response = await fetch('/stop_stream');
+                    const data = await response.json();
+
+                    if (data.status === 'stopped' || data.status === 'not running') {
+                        statusIndicator.textContent = 'OFF';
+                        statusIndicator.className = 'status off';
+                        stopVideoStream();
+                    }
+                } catch (error) {
+                    console.error('Error stopping stream:', error);
+                    this.checked = true;
+                }
+            }
+        });
+
+        // Проверить статус при загрузке страницы
+        document.addEventListener('DOMContentLoaded', checkStreamStatus);
+    </script>
+</body>
+</html>

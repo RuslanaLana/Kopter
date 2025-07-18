@@ -40,7 +40,7 @@ class VideoPlayer:
 
 if __name__ == "__main__":
     # Укажите путь к вашему видео файлу
-    video_path = r"C:\Users\Ruslana\Desktop\UAVS\MP4\DJI_20250610161607_0009_D.MP4"
+    video_path = r"C:\Users\Ruslana\Desktop\UAVS\MP4\DJI_20250610152750_0001_D.MP4"
 
     player = VideoPlayer(video_path)
     player.run()
