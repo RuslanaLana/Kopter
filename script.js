@@ -47,6 +47,12 @@ let hoverMarker = null;  // Маркер для подсветки точки п
 // Флаг, указывающий, что маршрут был успешно построен
 let isRouteCalculated = false;
 
+// Переменные для управления камерой
+let isCameraActive = false;
+let cameraInterval = null;
+const MAX_RETRIES = 3;
+let isCameraStopping = false;
+
 // Настройки внешнего вида меток для разных типов точек
 const pointIcons = {
     start: {  // Начальная точка (зеленая)
@@ -102,6 +108,9 @@ function init() {
         initTabs();
 
         document.getElementById('chart-toggle').addEventListener('click', toggleChartVisibility);
+
+        // // Инициализация кнопки камеры
+        // document.getElementById('toggle-camera').addEventListener('click', toggleCamera);
 
         console.log('Приложение успешно инициализировано');
     } catch (error) {
@@ -1297,5 +1306,214 @@ async function exportToGPX() {
         alert('Ошибка экспорта: ' + err.message);
     }
 }
+
+// // Функция для управления трансляцией
+// function toggleCamera() {
+//     const toggleBtn = document.getElementById('toggle-camera');
+//     const cameraFeed = document.getElementById('camera-feed');
+//
+//     if (toggleBtn.textContent.includes('Стоп')) {
+//         stopCamera();
+//     } else {
+//         startCamera();
+//     }
+// }
+//
+// function startCamera() {
+//     const toggleBtn = document.getElementById('toggle-camera');
+//     const cameraFeed = document.getElementById('camera-feed');
+//
+//     toggleBtn.disabled = true;
+//     toggleBtn.textContent = 'Подключение...';
+//
+//     // Сначала останавливаем предыдущую трансляцию
+//     stopCamera().then(() => {
+//         fetch('http://localhost:8000/camera_control?action=start')
+//             .then(response => response.json())
+//             .then(data => {
+//                 if (data.status === 'success') {
+//                     cameraFeed.style.display = 'block';
+//                     cameraFeed.src = 'http://localhost:8000/video_feed?' + Date.now();
+//
+//                     cameraFeed.onerror = () => {
+//                         if (!isCameraStopping) {
+//                             toggleBtn.textContent = 'Ошибка подключения';
+//                             setTimeout(() => toggleBtn.textContent = 'Старт трансляции', 2000);
+//                         }
+//                     };
+//
+//                     toggleBtn.disabled = false;
+//                     toggleBtn.textContent = 'Стоп трансляции';
+//                 } else {
+//                     throw new Error(data.message || 'Unknown error');
+//                 }
+//             })
+//             .catch(error => {
+//                 console.error('Start error:', error);
+//                 toggleBtn.disabled = false;
+//                 toggleBtn.textContent = 'Ошибка: ' + error.message;
+//                 setTimeout(() => toggleBtn.textContent = 'Старт трансляции', 2000);
+//             });
+//     });
+// }
+//
+// function stopCamera() {
+//     if (isCameraStopping) return;
+//
+//     const toggleBtn = document.getElementById('toggle-camera');
+//     const cameraFeed = document.getElementById('camera-feed');
+//
+//     isCameraStopping = true;
+//     toggleBtn.disabled = true;
+//     toggleBtn.textContent = 'Остановка...';
+//
+//     fetch('http://localhost:8000/camera_control?action=stop')
+//         .then(response => response.json())
+//         .then(data => {
+//             cameraFeed.src = '';
+//             cameraFeed.style.display = 'none';
+//             toggleBtn.disabled = false;
+//             toggleBtn.textContent = 'Старт трансляции';
+//             isCameraStopping = false;
+//         })
+//         .catch(error => {
+//             console.error('Stop error:', error);
+//             toggleBtn.disabled = false;
+//             toggleBtn.textContent = 'Стоп трансляции';
+//             isCameraStopping = false;
+//         });
+// }
+//
+// // Инициализация при загрузке
+// document.addEventListener('DOMContentLoaded', function() {
+//     document.getElementById('toggle-camera').addEventListener('click', toggleCamera);
+// });
+
+class CameraController {
+    constructor() {
+        this.isActive = false;
+        this.isLoading = false;
+        this.retryCount = 0;
+        this.maxRetries = 3;
+        this.cameraFeed = document.getElementById('camera-feed');
+        this.toggleBtn = document.getElementById('toggle-camera');
+
+        this.toggleBtn.addEventListener('click', () => this.toggle());
+        this.cameraFeed.onerror = () => this.handleError();
+    }
+
+    async toggle() {
+        if (this.isLoading) return;
+
+        if (this.isActive) {
+            await this.stop();
+        } else {
+            await this.start();
+        }
+    }
+
+    async start() {
+        if (this.isActive || this.isLoading) return;
+
+        this.isLoading = true;
+        this.updateUI('Подключение...', true);
+
+        try {
+            // 1. Остановить предыдущую трансляцию (если есть)
+            await this.stop();
+
+            // 2. Инициализировать камеру
+            const initResponse = await fetch('http://localhost:8000/start_camera');
+            const initData = await initResponse.json();
+
+            if (initData.status !== 'success') {
+                throw new Error(initData.message || 'Ошибка инициализации камеры');
+            }
+
+            // 3. Запустить видеопоток
+            this.cameraFeed.style.display = 'block';
+            this.cameraFeed.src = 'http://localhost:8000/video_feed?' + Date.now();
+
+            // 4. Проверить статус через 1 секунду
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            const statusResponse = await fetch('http://localhost:8000/camera_status');
+            const status = await statusResponse.json();
+
+            if (!status.active) {
+                throw new Error('Трансляция не активировалась');
+            }
+
+            this.isActive = true;
+            this.retryCount = 0;
+            this.updateUI('Стоп трансляции', false);
+
+        } catch (error) {
+            console.error('Camera start error:', error);
+
+            if (this.retryCount < this.maxRetries) {
+                this.retryCount++;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.start();
+            } else {
+                await this.stop();
+                this.updateUI(`Ошибка: ${error.message}`, false);
+                setTimeout(() => this.updateUI('Старт трансляции', false), 3000);
+            }
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    async stop() {
+        if (!this.isActive && !this.isLoading) return;
+
+        this.isLoading = true;
+        this.updateUI('Остановка...', true);
+
+        try {
+            // 1. Остановить видеопоток
+            this.cameraFeed.src = '';
+
+            // 2. Отправить команду остановки на сервер
+            await fetch('http://localhost:8000/stop_camera');
+
+            // 3. Подтвердить остановку
+            const statusResponse = await fetch('http://localhost:8000/camera_status');
+            const status = await statusResponse.json();
+
+            if (status.active) {
+                throw new Error('Камера не остановилась');
+            }
+
+            this.isActive = false;
+            this.updateUI('Старт трансляции', false);
+
+        } catch (error) {
+            console.error('Camera stop error:', error);
+            this.updateUI('Ошибка остановки', false);
+            setTimeout(() => this.updateUI('Стоп трансляции', false), 2000);
+        } finally {
+            this.isLoading = false;
+            this.cameraFeed.style.display = 'none';
+        }
+    }
+
+    handleError() {
+        if (this.isActive && !this.isLoading) {
+            console.log('Video stream error, attempting to reconnect...');
+            this.start();
+        }
+    }
+
+    updateUI(text, disabled) {
+        this.toggleBtn.textContent = text;
+        this.toggleBtn.disabled = disabled;
+    }
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    window.cameraController = new CameraController();
+});
 
 window.removePlacemark = removePlacemark;

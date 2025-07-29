@@ -437,3 +437,28 @@ h2 {
 #hover-info div {
     margin: 5px 0;
 }
+
+#camera-container {
+    margin-top: 20px;
+    padding: 10px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+#camera-stream {
+    position: relative;
+    border: 1px solid #ddd;
+}
+
+#camera-feed {
+    background: #000;
+}
+
+#toggle-camera {
+    background: #4CAF50;
+}
+
+#toggle-camera.running {
+    background: #F44336;
+}
