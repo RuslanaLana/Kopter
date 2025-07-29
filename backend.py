@@ -1,8 +1,7 @@
 # Импорт необходимых библиотек
 import math
-import warnings
-
-from flask import Flask, request, jsonify, make_response
+import threading
+from flask import Flask, request, jsonify, make_response, Response
 from flask_cors import CORS
 import gpxpy
 import gpxpy.gpx
@@ -11,11 +10,25 @@ from scipy.interpolate import Akima1DInterpolator
 import re
 from typing import List
 from werkzeug.exceptions import HTTPException
+from MvCameraControl_class import *
+import cv2
+from ctypes import *# Коды ошибок
+MV_E_NO_DATA = -2147483644  # 0x80000004: Нет данных
+MV_OK = 0  # Успешное выполнение
+
 # Создание экземпляра Flask приложения
 app = Flask(__name__)
 CORS(app)
 
 from pydantic import BaseModel
+
+camera_lock = threading.Lock()
+camera_instance = None
+camera_active = False
+STOP_EVENT = threading.Event()
+CAMERA_LOCK = threading.Lock()
+CAMERA_INSTANCE = None
+STREAM_ACTIVE = False
 
 class Point(BaseModel):
     lat: float
@@ -27,6 +40,76 @@ class Point(BaseModel):
 class RouteRequest(BaseModel):
     points: List[Point]
     smooth: bool = True
+
+
+def init_camera():
+    global camera_instance, camera_active
+
+    with camera_lock:
+        if camera_instance is not None:
+            return camera_instance
+
+        try:
+            # 1. Поиск устройств
+            device_list = MV_CC_DEVICE_INFO_LIST()
+            ret = MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE, device_list)
+            if ret != MV_OK or device_list.nDeviceNum == 0:
+                raise RuntimeError("No cameras found")
+
+            # 2. Создание объекта камеры
+            cam = MvCamera()
+            device_info = MV_CC_DEVICE_INFO()
+            pointer_device_info = pointer(device_info)
+            memmove(pointer_device_info, device_list.pDeviceInfo[0], sizeof(device_info))
+
+            # 3. Создание дескриптора
+            handle = c_void_p()
+            ret = MvCamCtrldll.MV_CC_CreateHandle(byref(handle), byref(device_info))
+            if ret != MV_OK:
+                raise RuntimeError("Failed to create camera handle")
+
+            cam.handle = handle
+
+            # 4. Подключение к камере
+            ret = cam.MV_CC_OpenDevice()
+            if ret != MV_OK:
+                raise RuntimeError("Failed to open camera")
+
+            # 5. Настройка параметров
+            cam.MV_CC_SetEnumValue("PixelFormat", PixelType_Gvsp_Mono8)
+            cam.MV_CC_SetEnumValue("ExposureAuto", MV_EXPOSURE_AUTO_MODE_CONTINUOUS)
+            cam.MV_CC_SetFloatValue("TargetBrightness", 60.0)
+
+            # 6. Запуск захвата
+            ret = cam.MV_CC_StartGrabbing()
+            if ret != MV_OK:
+                raise RuntimeError("Failed to start grabbing")
+
+            camera_instance = cam
+            camera_active = True
+            return cam
+
+        except Exception as e:
+            close_camera()
+            raise e
+
+
+def close_camera():
+    global camera_instance, camera_active
+
+    with camera_lock:
+        if camera_instance is not None:
+            try:
+                if camera_active:
+                    camera_instance.MV_CC_StopGrabbing()
+                if hasattr(camera_instance, 'handle'):
+                    camera_instance.MV_CC_CloseDevice()
+                    MvCamCtrldll.MV_CC_DestroyHandle(camera_instance.handle)
+            except Exception as e:
+                print(f"Error closing camera: {str(e)}")
+            finally:
+                camera_instance = None
+                camera_active = False
 
 # Настройка CORS (используйте flask-cors для более полной реализации)
 @app.after_request
@@ -251,6 +334,128 @@ def handle_exception(e):
         "status": "error",
         "message": e.description
     }), e.code
+
+@app.route('/video_feed')
+def video_feed():
+    def generate():
+        global STREAM_ACTIVE
+        with CAMERA_LOCK:
+            cam = CAMERA_INSTANCE
+            if not cam:
+                return
+
+            STREAM_ACTIVE = True
+            try:
+                while STREAM_ACTIVE:
+                    stFrame = MV_FRAME_OUT()
+                    memset(byref(stFrame), 0, sizeof(stFrame))
+
+                    ret = cam.MV_CC_GetImageBuffer(stFrame, 1000)
+                    if ret == MV_E_NO_DATA:
+                        continue
+                    elif ret != MV_OK:
+                        break
+
+                    # Обработка кадра
+                    buffer = (c_ubyte * stFrame.stFrameInfo.nFrameLen).from_buffer_copy(
+                        string_at(stFrame.pBufAddr, stFrame.stFrameInfo.nFrameLen))
+                    img_np = np.frombuffer(buffer, dtype=np.uint8)
+                    img_np = img_np.reshape((stFrame.stFrameInfo.nHeight, stFrame.stFrameInfo.nWidth))
+
+                    # Оптимизация и кодирование
+                    img_color = optimize_image(img_np)
+                    _, jpeg = cv2.imencode('.jpg', img_color)
+                    frame = jpeg.tobytes()
+
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+                    cam.MV_CC_FreeImageBuffer(stFrame)
+            finally:
+                STREAM_ACTIVE = False
+
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/camera_status')
+def camera_status():
+    return jsonify({
+        "active": STREAM_ACTIVE,
+        "camera_initialized": CAMERA_INSTANCE is not None
+    })
+
+@app.route('/start_camera')
+def start_camera():
+    global CAMERA_INSTANCE
+    with CAMERA_LOCK:
+        if CAMERA_INSTANCE is None:
+            try:
+                CAMERA_INSTANCE = init_camera()
+                return jsonify({"status": "success"})
+            except Exception as e:
+                CAMERA_INSTANCE = None
+                return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "success"})
+
+@app.route('/stop_camera')
+def stop_camera():
+    global CAMERA_INSTANCE, STREAM_ACTIVE
+    with CAMERA_LOCK:
+        STREAM_ACTIVE = False
+        if CAMERA_INSTANCE:
+            close_camera()
+            CAMERA_INSTANCE = None
+    return jsonify({"status": "success"})
+
+def generate_frames():
+    cam = None
+    try:
+        cam = init_camera()
+        while not STOP_EVENT.is_set():
+            stFrame = MV_FRAME_OUT()
+            memset(byref(stFrame), 0, sizeof(stFrame))
+
+            ret = cam.MV_CC_GetImageBuffer(stFrame, 1000)
+            if ret == MV_E_NO_DATA:
+                continue  # Пропускаем если нет данных
+            elif ret != MV_OK:
+                print(f"Frame error: {ret}")
+                break  # Выходим при других ошибках
+
+            # Обработка кадра
+            buffer = (c_ubyte * stFrame.stFrameInfo.nFrameLen).from_buffer_copy(
+                string_at(stFrame.pBufAddr, stFrame.stFrameInfo.nFrameLen))
+            img_np = np.frombuffer(buffer, dtype=np.uint8)
+            img_np = img_np.reshape((stFrame.stFrameInfo.nHeight, stFrame.stFrameInfo.nWidth))
+
+            # Оптимизация и кодирование
+            img_color = optimize_image(img_np)
+            _, jpeg = cv2.imencode('.jpg', img_color)
+            frame = jpeg.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+            cam.MV_CC_FreeImageBuffer(stFrame)
+
+    except Exception as e:
+        print(f"Camera stream error: {str(e)}")
+    finally:
+        if cam:
+            try:
+                cam.MV_CC_StopGrabbing()
+            except:
+                pass
+
+def optimize_image(img):
+    """Оптимизация ЧБ изображения"""
+    current_mean = np.mean(img)
+    if current_mean < 30:
+        img = cv2.equalizeHist(img)
+    elif current_mean > 200:
+        img = cv2.convertScaleAbs(img, alpha=0.7, beta=0)
+    else:
+        img = cv2.convertScaleAbs(img, alpha=1.2, beta=10)
+    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
 # Запуск сервера
 if __name__ == "__main__":
