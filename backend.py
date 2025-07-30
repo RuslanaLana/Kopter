@@ -13,6 +13,8 @@ from werkzeug.exceptions import HTTPException
 from MvCameraControl_class import *
 import cv2
 from ctypes import *# Коды ошибок
+from scipy.ndimage import gaussian_filter1d
+
 MV_E_NO_DATA = -2147483644  # 0x80000004: Нет данных
 MV_OK = 0  # Успешное выполнение
 
@@ -29,6 +31,17 @@ STOP_EVENT = threading.Event()
 CAMERA_LOCK = threading.Lock()
 CAMERA_INSTANCE = None
 STREAM_ACTIVE = False
+
+# Глобальные переменные для управления экспозицией
+TARGET_BRIGHTNESS = 60.0           # Целевая яркость (0-255)
+INITIAL_EXPOSURE = 30000.0         # Стартовая экспозиция (высокая для темноты)
+MIN_EXPOSURE = 20000.0             # Минимальная экспозиция (не даём опускаться ниже уровня для темноты)
+MAX_EXPOSURE = 100000.0            # Максимальная экспозиция
+SMOOTHING_FACTOR_UP = 0.05         # Плавность при увеличении экспозиции (для темноты)
+SMOOTHING_FACTOR_DOWN = 0.01       # Плавность при уменьшении (для света, очень медленно)
+
+# Глобальные переменные
+current_exposure = INITIAL_EXPOSURE
 
 class Point(BaseModel):
     lat: float
@@ -407,55 +420,66 @@ def stop_camera():
     return jsonify({"status": "success"})
 
 def generate_frames():
-    cam = None
+    cam = init_camera()
+    cam.MV_CC_SetEnumValue("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF)  # Отключаем автоэкспозицию!
+    cam.MV_CC_SetFloatValue("ExposureTime", INITIAL_EXPOSURE)
+
     try:
-        cam = init_camera()
         while not STOP_EVENT.is_set():
             stFrame = MV_FRAME_OUT()
             memset(byref(stFrame), 0, sizeof(stFrame))
 
             ret = cam.MV_CC_GetImageBuffer(stFrame, 1000)
-            if ret == MV_E_NO_DATA:
-                continue  # Пропускаем если нет данных
-            elif ret != MV_OK:
-                print(f"Frame error: {ret}")
-                break  # Выходим при других ошибках
+            if ret != MV_OK:
+                continue
 
-            # Обработка кадра
+            # Декодируем кадр
             buffer = (c_ubyte * stFrame.stFrameInfo.nFrameLen).from_buffer_copy(
                 string_at(stFrame.pBufAddr, stFrame.stFrameInfo.nFrameLen))
             img_np = np.frombuffer(buffer, dtype=np.uint8)
             img_np = img_np.reshape((stFrame.stFrameInfo.nHeight, stFrame.stFrameInfo.nWidth))
 
-            # Оптимизация и кодирование
-            img_color = optimize_image(img_np)
-            _, jpeg = cv2.imencode('.jpg', img_color)
-            frame = jpeg.tobytes()
+            # Оптимизируем яркость
+            img_processed = optimize_image(img_np)
 
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            # Обновляем экспозицию камеры
+            cam.MV_CC_SetFloatValue("ExposureTime", current_exposure)
+
+            # Кодируем в JPEG и отправляем
+            _, jpeg = cv2.imencode('.jpg', img_processed)
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
 
             cam.MV_CC_FreeImageBuffer(stFrame)
-
-    except Exception as e:
-        print(f"Camera stream error: {str(e)}")
     finally:
-        if cam:
-            try:
-                cam.MV_CC_StopGrabbing()
-            except:
-                pass
+        cam.MV_CC_StopGrabbing()
 
 def optimize_image(img):
-    """Оптимизация ЧБ изображения"""
-    current_mean = np.mean(img)
-    if current_mean < 30:
-        img = cv2.equalizeHist(img)
-    elif current_mean > 200:
-        img = cv2.convertScaleAbs(img, alpha=0.7, beta=0)
-    else:
-        img = cv2.convertScaleAbs(img, alpha=1.2, beta=10)
-    return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    global current_exposure
+    current_brightness = np.mean(img)
+    error = TARGET_BRIGHTNESS - current_brightness
+
+    # Асимметричная регулировка:
+    # - Медленно уменьшаем экспозицию при светлых кадрах (SMOOTHING_FACTOR_DOWN)
+    # - Быстрее увеличиваем при тёмных (SMOOTHING_FACTOR_UP)
+    smoothing_factor = SMOOTHING_FACTOR_DOWN if error < 0 else SMOOTHING_FACTOR_UP
+    exposure_adjustment = error * smoothing_factor * 100
+
+    # Запрещаем экспозиции опускаться ниже MIN_EXPOSURE
+    new_exposure = max(MIN_EXPOSURE, current_exposure + exposure_adjustment)
+    new_exposure = min(new_exposure, MAX_EXPOSURE)
+
+    # Применяем новую экспозицию
+    current_exposure = new_exposure
+
+    # Лёгкая программная коррекция (без пересветов)
+    gain = 1.0 + (error / 255.0) * 0.2  # Очень мягкое усиление
+    img_corrected = cv2.convertScaleAbs(img, alpha=gain, beta=0)
+
+    # Для тёмных кадров — гистограммное выравнивание
+    if current_brightness < 30:
+        img_corrected = cv2.equalizeHist(img_corrected)
+
+    return cv2.cvtColor(img_corrected, cv2.COLOR_GRAY2BGR)
 
 # Запуск сервера
 if __name__ == "__main__":
