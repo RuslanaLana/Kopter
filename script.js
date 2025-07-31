@@ -53,6 +53,12 @@ let cameraInterval = null;
 const MAX_RETRIES = 3;
 let isCameraStopping = false;
 
+let videoPlayer = null;
+let videoFrameCount = 0;
+const videoFPS = 30; // Будет обновляться при загрузке видео
+let videoStartTime = 0;
+
+
 // Настройки внешнего вида меток для разных типов точек
 const pointIcons = {
     start: {  // Начальная точка (зеленая)
@@ -106,6 +112,26 @@ function init() {
         initEventHandlers();
 
         initTabs();
+
+        // Инициализация видео элемента
+        const videoContainer = document.getElementById('video-container');
+        videoContainer.innerHTML = `
+            <h3>Воспроизведение видео</h3>
+            <img id="video-stream" style="width:100%; height:240px; background:#000; object-fit:contain;">
+        `;
+
+        const videoStream = document.getElementById('video-stream');
+        if (videoStream) {
+            videoStream.onerror = function() {
+                console.error('Video stream error');
+                alert('Ошибка загрузки видео. Убедитесь, что файл видео существует.');
+                if (isPlaying) {
+                    toggleAnimation();
+                }
+            };
+        }
+
+        updateMediaDisplay();
 
         document.getElementById('chart-toggle').addEventListener('click', toggleChartVisibility);
 
@@ -321,6 +347,8 @@ function initTabs() {
 
             // Очищаем карту при переключении
             clearAll();
+            // Переключаем отображение камеры/видео
+            updateMediaDisplay();
         });
     });
 }
@@ -407,6 +435,27 @@ function updateMapHeight() {
         mapElement.classList.add('with-chart');
     } else {
         mapElement.classList.remove('with-chart');
+    }
+}
+
+
+// Новая функция для обновления отображения медиа
+function updateMediaDisplay() {
+    const activeTab = document.querySelector('.tab-content.active').id;
+    const cameraContainer = document.getElementById('camera-container');
+    const videoContainer = document.getElementById('video-container');
+
+    if (activeTab === 'manual-tab') {
+        cameraContainer.style.display = 'block';
+        videoContainer.style.display = 'none';
+    } else {
+        cameraContainer.style.display = 'none';
+        videoContainer.style.display = 'block';
+    }
+
+    // Останавливаем видео при переключении вкладок
+    if (videoPlayer && isPlaying) {
+        toggleAnimation();
     }
 }
 
@@ -822,6 +871,14 @@ async function parseSRTFile(file) {
             displayRoute(routePoints);
             updateChart(routePoints);
             if (routePoints.length > 0) showCameraParams(routePoints[0]);
+
+            // Добавляем этот код для правильного отображения высоты
+            document.getElementById('chart-container').style.display = 'block';
+            document.getElementById('chart-toggle').textContent = '📉';
+            document.getElementById('map').classList.add('with-chart');
+
+            // Обновляем высоту панели
+            document.getElementById('panel').style.height = 'calc(100% - 20px - 300px)';
         } else {
             throw new Error(data.message || 'Ошибка сервера');
         }
@@ -875,30 +932,34 @@ function displayRoute(points) {
 
 function toggleAnimation() {
     const animBtn = document.getElementById('animation-control');
+    const videoStream = document.getElementById('video-stream');
+
     if (isPlaying) {
-        // Останавливаем анимацию
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-        isPlaying = false;
+        stopAnimation();
         animBtn.textContent = 'Старт анимации';
         animBtn.classList.remove('playing');
-        uavPlacemark.options.set('visible', false);
+        if (videoStream) videoStream.src = '';
     } else {
-        // Запускаем анимацию
         if (routePoints.length === 0) {
             alert('Сначала загрузите файл траектории');
             return;
         }
 
+        // Start the video stream with current timestamp to avoid caching
+        videoStream.src = `http://localhost:8000/video_feed_sync?t=${Date.now()}`;
+
+        // Initialize animation variables
+        videoFrameCount = 0;
+        videoStartTime = null;
+
         animBtn.textContent = 'Стоп анимации';
         animBtn.classList.add('playing');
         isPlaying = true;
-        animationStartTime = null;
-        animationProgress = 0;
         uavPlacemark.options.set('visible', true);
         startAnimation();
     }
 }
+
 
 // Запуск анимации
 function startAnimation() {
@@ -906,42 +967,60 @@ function startAnimation() {
 }
 
 function animateUAV(timestamp) {
-    if (!animationStartTime) animationStartTime = timestamp;
-    const elapsed = timestamp - animationStartTime;
-    animationProgress = Math.min(elapsed / (2000 / animationSpeed), 1);
+    if (!isPlaying) return;
 
-    const currentPosition = getPositionOnRoute(animationProgress);
-    if (!currentPosition) {
+    if (!videoStartTime) {
+        videoStartTime = timestamp;
+    }
+
+    // Calculate elapsed time in milliseconds
+    const elapsed = timestamp - videoStartTime;
+
+    // Calculate current frame based on elapsed time and FPS
+    const currentFrame = Math.floor(elapsed * videoFPS / 1000);
+
+    // Ensure we don't go beyond the route points
+    if (currentFrame >= routePoints.length) {
         stopAnimation();
         return;
     }
 
-    updateUAVPosition(currentPosition);
-    updateChartMarker(currentPosition.index); // Обновляем маркер на графике
+    // Only update if we've moved to a new frame
+    if (currentFrame > videoFrameCount) {
+        videoFrameCount = currentFrame;
+        const point = routePoints[currentFrame];
 
-    if (animationProgress < 1) {
-        animationFrameId = requestAnimationFrame(animateUAV);
-    } else {
-        stopAnimation();
+        // Update UAV position
+        updateUAVPosition(point);
+
+        // Update chart marker
+        updateChartMarker(currentFrame);
     }
+
+    // Continue animation
+    animationFrameId = requestAnimationFrame(animateUAV);
 }
 
 function stopAnimation() {
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
     isPlaying = false;
+    videoStartTime = 0;
+    videoFrameCount = 0;
+
+    if (videoPlayer) {
+        videoPlayer.pause();
+        videoPlayer.currentTime = 0;
+    }
+
+    if (uavPlacemark) {
+        uavPlacemark.options.set('visible', false);
+    }
 
     const animBtn = document.getElementById('animation-control');
     if (animBtn) {
         animBtn.textContent = 'Старт анимации';
         animBtn.classList.remove('playing');
-    }
-
-    // Скрываем метку БПЛА при остановке
-    if (uavPlacemark) {
-        uavPlacemark.options.set('visible', false);
     }
 }
 

@@ -1,7 +1,9 @@
 # Импорт необходимых библиотек
 import math
 import threading
-from flask import Flask, request, jsonify, make_response, Response
+import time
+
+from flask import Flask, request, jsonify, make_response, Response, render_template, send_from_directory
 from flask_cors import CORS
 import gpxpy
 import gpxpy.gpx
@@ -32,6 +34,8 @@ CAMERA_LOCK = threading.Lock()
 CAMERA_INSTANCE = None
 STREAM_ACTIVE = False
 
+SRT_FILENAME = None  # Будет хранить имя файла без расширения
+
 # Глобальные переменные для управления экспозицией
 TARGET_BRIGHTNESS = 60.0           # Целевая яркость (0-255)
 INITIAL_EXPOSURE = 30000.0         # Стартовая экспозиция (высокая для темноты)
@@ -54,6 +58,13 @@ class RouteRequest(BaseModel):
     points: List[Point]
     smooth: bool = True
 
+@app.route('/')
+def serve_index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    return send_from_directory('.', path)
 
 def init_camera():
     global camera_instance, camera_active
@@ -176,6 +187,7 @@ def smooth_route(points):
 # Эндпоинт для импорта SRT файлов
 @app.post("/api/import-srt")
 def import_srt():
+    global SRT_FILENAME
     try:
         if 'file' not in request.files:
             return jsonify({"status": "error", "message": "No file uploaded"}), 400
@@ -186,6 +198,9 @@ def import_srt():
 
         if not file.filename.lower().endswith('.srt'):
             return jsonify({"status": "error", "message": "Only .srt files are allowed"}), 400
+
+        # Сохраняем имя файла без расширения
+        SRT_FILENAME = file.filename.rsplit('.', 1)[0]  # Удаляем расширение .srt
 
         srt_content = file.read().decode('utf-8')
         points = []
@@ -265,6 +280,43 @@ def export_gpx():
     except Exception as e:
         return handle_error(str(e), 500)
 
+@app.route('/video_feed_sync')
+def video_feed_sync():
+    global SRT_FILENAME, route_points
+
+    if not SRT_FILENAME:
+        return "No SRT file selected", 404
+
+    video_filename = f"{SRT_FILENAME}_avc.mp4"
+    video_path = f"static/{video_filename}"
+
+    def generate():
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"Failed to open video file: {video_path}")
+            return
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_delay = 1 / fps if fps > 0 else 1/30  # default to 30fps if fps is 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            _, jpeg = cv2.imencode('.jpg', frame)
+            frame_data = jpeg.tobytes()
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+
+            time.sleep(frame_delay)  # Точная синхронизация по FPS
+
+        cap.release()
+
+    return Response(generate(),
+                   mimetype='multipart/x-mixed-replace; boundary=frame',
+                   headers={'Cache-Control': 'no-cache'})
 
 @app.route('/api/calculate-route', methods=['POST'])
 def calculate_route():

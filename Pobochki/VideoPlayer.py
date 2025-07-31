@@ -1,5 +1,4 @@
 import cv2
-import time
 
 
 class VideoPlayer:
@@ -24,7 +23,7 @@ class VideoPlayer:
                     print("Видео закончилось или произошла ошибка чтения.")
                     break
 
-                cv2.imshow('HEVC Video Player', frame)
+                cv2.imshow('AVC (H.264) Video Player', frame)
 
             key = cv2.waitKey(self.delay) & 0xFF
 
@@ -39,8 +38,8 @@ class VideoPlayer:
 
 
 if __name__ == "__main__":
-    # Укажите путь к вашему видео файлу
-    video_path = r"C:\Users\Ruslana\Desktop\UAVS\MP4\DJI_20250610152750_0001_D.MP4"
+    # Укажите путь к вашему видео файлу в формате AVC (H.264)
+    video_path = r"C:\Users\Ruslana\Desktop\UAVS\MP4\DJI_20250610152750_0001_D_avc.mp4"  # Замените на ваш файл
 
     player = VideoPlayer(video_path)
     player.run()
