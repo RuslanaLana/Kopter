@@ -35,10 +35,7 @@ let chartData = {        // Данные для построения графи�
 };
 
 // Настройки анимации
-let animationSpeed = 0.01;  // Скорость проигрывания анимации (0-1)
 let animationFrameId = null; // ID для управления анимационным кадром
-let animationStartTime = null; // Время начала анимации
-let animationProgress = 0;    // Текущий прогресс анимации (0-1)
 
 // Переменные для взаимодействия с картой
 let hoveredPoint = null; // Точка маршрута, над которой находится курсор
@@ -46,12 +43,6 @@ let hoverMarker = null;  // Маркер для подсветки точки п
 
 // Флаг, указывающий, что маршрут был успешно построен
 let isRouteCalculated = false;
-
-// Переменные для управления камерой
-let isCameraActive = false;
-let cameraInterval = null;
-const MAX_RETRIES = 3;
-let isCameraStopping = false;
 
 let videoPlayer = null;
 let videoFrameCount = 0;
@@ -405,26 +396,23 @@ function toggleChartVisibility() {
     const chartContainer = document.getElementById('chart-container');
     const toggleBtn = document.getElementById('chart-toggle');
     const panel = document.getElementById('panel');
+    const mapElement = document.getElementById('map');
 
     if (chartContainer.style.display === 'none' || !chartContainer.style.display) {
         chartContainer.style.display = 'block';
         toggleBtn.textContent = '📉';
-        // Обновляем высоту панели при отображении графика
         panel.style.height = 'calc(100% - 20px - 300px)';
+        mapElement.classList.add('with-chart');
 
-        // Инициализируем график если он еще не создан
         if (!altitudeChart && chartData.distances.length > 0) {
             initAltitudeChart();
         }
     } else {
         chartContainer.style.display = 'none';
         toggleBtn.textContent = '📈';
-        // Восстанавливаем высоту панели при скрытии графика
         panel.style.height = 'calc(100% - 20px)';
+        mapElement.classList.remove('with-chart');
     }
-
-    // Обновляем высоту карты
-    updateMapHeight();
 }
 
 function updateMapHeight() {
